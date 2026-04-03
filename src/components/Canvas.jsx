@@ -19,6 +19,7 @@ export default function Canvas({ backgroundImage }) {
   const [color, setColor] = useState('#ec4899')
   const [width, setWidth] = useState(4)
   const [textInput, setTextInput] = useState(null)
+  const [showGrid, setShowGrid] = useState(false)
 
   const isDrawing = useRef(false)
   const startPos = useRef({ x: 0, y: 0 })
@@ -205,6 +206,15 @@ export default function Canvas({ backgroundImage }) {
 
   return (
     <div className="relative w-full h-full overflow-hidden bg-white/5">
+      {/* Grid Overlay */}
+      <div 
+        className={`absolute inset-0 pointer-events-none transition-opacity duration-300 ${showGrid ? 'opacity-100' : 'opacity-0'}`}
+        style={{ 
+           backgroundImage: 'linear-gradient(to right, rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.05) 1px, transparent 1px)', 
+           backgroundSize: '40px 40px' 
+        }} 
+      />
+
       {backgroundImage && (
         <div 
           className="absolute inset-0 bg-contain bg-center bg-no-repeat opacity-40 pointer-events-none transition-all duration-500"
@@ -287,6 +297,15 @@ export default function Canvas({ backgroundImage }) {
                 </button>
             ))}
          </div>
+
+         <div className="w-px h-6 bg-white/20 mx-1" />
+
+         <button 
+           onClick={() => setShowGrid(!showGrid)}
+           className={`px-3 py-1.5 text-sm font-semibold rounded-lg transition-colors
+                      ${showGrid ? 'bg-primary text-white shadow-lg' : 'bg-white/10 text-gray-300 hover:bg-white/20'}`}>
+            Grid
+         </button>
 
          <div className="w-px h-6 bg-white/20 mx-1" />
 
