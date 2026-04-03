@@ -8,6 +8,7 @@ const ROOM_ID = 'test-session-123'
 export default function Sidebar({ onSetBackground, onSetSideBySide }) {
   const [documents, setDocuments] = useState([])
   const [isUploading, setIsUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
   const [openMenuId, setOpenMenuId] = useState(null)
 
   useEffect(() => {
@@ -29,24 +30,38 @@ export default function Sidebar({ onSetBackground, onSetSideBySide }) {
       if (!file) return
 
       setIsUploading(true)
-      const fileRef = storageRef(storage, `sessions/${ROOM_ID}/${Date.now()}_${file.name}`)
-      const uploadTask = uploadBytesResumable(fileRef, file)
+      setUploadProgress(0)
 
-      uploadTask.on('state_changed', 
-         () => { /* progress */ },
-         (error) => {
-             console.error("Upload failed", error)
-             setIsUploading(false)
-         },
-         async () => {
-             const downloadURL = await getDownloadURL(uploadTask.snapshot.ref)
-             await push(rtdbRef(rtdb, `sessions/${ROOM_ID}/documents`), {
-                 title: file.name,
-                 url: downloadURL
-             })
-             setIsUploading(false)
-         }
-      )
+      try {
+        const fileRef = storageRef(storage, `sessions/${ROOM_ID}/${Date.now()}_${file.name}`)
+        const uploadTask = uploadBytesResumable(fileRef, file)
+
+        uploadTask.on('state_changed', 
+          (snapshot) => {
+              const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100
+              setUploadProgress(Math.round(progress))
+          },
+          (error) => {
+              console.error("Upload failed", error)
+              window.alert(`Upload failed: ${error.message}. Please ensure Firebase Storage is enabled and rules allow uploads.`)
+              setIsUploading(false)
+              setUploadProgress(0)
+          },
+          async () => {
+              const downloadURL = await getDownloadURL(uploadTask.snapshot.ref)
+              await push(rtdbRef(rtdb, `sessions/${ROOM_ID}/documents`), {
+                  title: file.name,
+                  url: downloadURL
+              })
+              setIsUploading(false)
+              setUploadProgress(0)
+          }
+        )
+      } catch (err) {
+        console.error("Setup failed", err)
+        window.alert(`Could not start upload: ${err.message}`)
+        setIsUploading(false)
+      }
   }
 
   return (
@@ -57,8 +72,8 @@ export default function Sidebar({ onSetBackground, onSetSideBySide }) {
       
       {/* Upload Button */}
       <div className="mb-4">
-         <label className={`block w-full text-center py-2 px-4 rounded border text-sm font-semibold transition-all cursor-pointer ${isUploading ? 'bg-gray-800 border-gray-700 text-gray-500' : 'bg-primary/10 border-primary text-primary hover:bg-primary/20'}`}>
-            {isUploading ? 'Uploading...' : 'Upload Document'}
+         <label className={`block w-full text-center py-2 px-4 rounded border text-sm font-semibold transition-all cursor-pointer ${isUploading ? 'bg-gray-800 border-gray-700 text-gray-400' : 'bg-primary/10 border-primary text-primary hover:bg-primary/20'}`}>
+            {isUploading ? `Uploading... ${uploadProgress}%` : 'Upload Document'}
             <input 
                type="file" 
                accept="image/*,application/pdf" 

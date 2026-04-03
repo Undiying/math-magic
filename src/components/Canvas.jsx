@@ -1,6 +1,6 @@
-import React, { useRef, useEffect, useState } from 'react'
 import { ref, push, onChildAdded, onValue, remove } from 'firebase/database'
 import { rtdb } from '../firebase/config'
+import { Pencil, Minus, Square, Triangle, Ruler, Type, Grid, Trash2 } from 'lucide-react'
 
 const ROOM_ID = 'test-session-123'
 
@@ -15,7 +15,7 @@ export default function Canvas({ backgroundImage }) {
   const canvasRef = useRef(null)
   
   const [ctx, setCtx] = useState(null)
-  const [tool, setTool] = useState('pen') // pen, line, rect, text
+  const [tool, setTool] = useState('pen') // pen, line, rect, triangle, ruler, text
   const [color, setColor] = useState('#ec4899')
   const [width, setWidth] = useState(4)
   const [textInput, setTextInput] = useState(null)
@@ -95,6 +95,25 @@ export default function Canvas({ backgroundImage }) {
          context.stroke()
       } else if (obj.type === 'rect') {
          context.strokeRect(obj.startX, obj.startY, obj.w, obj.h)
+      } else if (obj.type === 'triangle') {
+         context.beginPath()
+         context.moveTo(obj.startX, obj.startY)
+         context.lineTo(obj.endX, obj.endY)
+         context.lineTo(obj.startX, obj.endY)
+         context.closePath()
+         context.stroke()
+      } else if (obj.type === 'ruler') {
+         // Draw main line
+         context.moveTo(obj.startX, obj.startY)
+         context.lineTo(obj.endX, obj.endY)
+         context.stroke()
+         // Draw measurement label
+         const midX = (obj.startX + obj.endX) / 2
+         const midY = (obj.startY + obj.endY) / 2
+         const dist = Math.round(Math.sqrt(Math.pow(obj.endX - obj.startX, 2) + Math.pow(obj.endY - obj.startY, 2)))
+         context.font = 'bold 12px sans-serif'
+         context.fillStyle = '#ffffff'
+         context.fillText(`${dist}px`, midX + 10, midY)
       } else if (obj.type === 'text') {
          context.font = `${obj.width * 6 + 10}px sans-serif`
          context.fillText(obj.text, obj.x, obj.y)
@@ -151,6 +170,21 @@ export default function Canvas({ backgroundImage }) {
             ctx.stroke()
         } else if (tool === 'rect') {
             ctx.strokeRect(startPos.current.x, startPos.current.y, offsetX - startPos.current.x, offsetY - startPos.current.y)
+        } else if (tool === 'triangle') {
+            ctx.beginPath()
+            ctx.moveTo(startPos.current.x, startPos.current.y)
+            ctx.lineTo(offsetX, offsetY)
+            ctx.lineTo(startPos.current.x, offsetY)
+            ctx.closePath()
+            ctx.stroke()
+        } else if (tool === 'ruler') {
+            ctx.moveTo(startPos.current.x, startPos.current.y)
+            ctx.lineTo(offsetX, offsetY)
+            ctx.stroke()
+            const dist = Math.round(Math.sqrt(Math.pow(offsetX - startPos.current.x, 2) + Math.pow(offsetY - startPos.current.y, 2)))
+            ctx.font = 'bold 12px sans-serif'
+            ctx.fillStyle = '#ffffff'
+            ctx.fillText(`${dist}px`, (startPos.current.x + offsetX) / 2 + 10, (startPos.current.y + offsetY) / 2)
         }
     }
   }
@@ -178,6 +212,24 @@ export default function Canvas({ backgroundImage }) {
            color, width
         }
         push(ref(rtdb, `sessions/${ROOM_ID}/strokes`), rectObj)
+        redrawAll()
+    } else if (tool === 'triangle') {
+        const triObj = {
+           type: 'triangle',
+           startX: startPos.current.x, startY: startPos.current.y,
+           endX: offsetX, endY: offsetY,
+           color, width
+        }
+        push(ref(rtdb, `sessions/${ROOM_ID}/strokes`), triObj)
+        redrawAll()
+    } else if (tool === 'ruler') {
+        const rulerObj = {
+           type: 'ruler',
+           startX: startPos.current.x, startY: startPos.current.y,
+           endX: offsetX, endY: offsetY,
+           color, width
+        }
+        push(ref(rtdb, `sessions/${ROOM_ID}/strokes`), rulerObj)
         redrawAll()
     }
   }
@@ -253,16 +305,24 @@ export default function Canvas({ backgroundImage }) {
       {/* Dynamic Toolbar */}
       <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 bg-surface/90 backdrop-blur-md px-6 py-3 rounded-full border border-white/10 shadow-2xl flex items-center gap-6">
          
-         {/* Tools */}
+         {/* Tools Icons */}
          <div className="flex items-center gap-2">
-            {['pen', 'line', 'rect', 'text'].map(t => (
+            {[
+              { id: 'pen', icon: Pencil },
+              { id: 'line', icon: Minus },
+              { id: 'rect', icon: Square },
+              { id: 'triangle', icon: Triangle },
+              { id: 'ruler', icon: Ruler },
+              { id: 'text', icon: Type }
+            ].map(t => (
                 <button 
-                  key={t}
-                  onClick={() => setTool(t)}
-                  className={`w-8 h-8 flex items-center justify-center rounded-md transition-all capitalize text-xs font-semibold
-                              ${tool === t ? 'bg-primary text-white shadow-lg shadow-primary/50' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}
+                  key={t.id}
+                  onClick={() => setTool(t.id)}
+                  className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all
+                              ${tool === t.id ? 'bg-primary text-white shadow-lg shadow-primary/50' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}
+                  title={t.id}
                 >
-                  {t.substring(0, 1)}
+                  <t.icon size={18} strokeWidth={2.5} />
                 </button>
             ))}
          </div>
@@ -311,8 +371,10 @@ export default function Canvas({ backgroundImage }) {
 
          <button 
            onClick={clearCanvas} 
-           className="px-4 py-1.5 text-sm font-semibold bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white rounded-full transition-colors">
-            Clear
+           className="p-2 text-red-400 hover:bg-red-500 hover:text-white rounded-full transition-all group"
+           title="Clear All"
+          >
+            <Trash2 size={20} className="group-hover:scale-110 transition-transform" />
          </button>
       </div>
     </div>
