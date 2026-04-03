@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react'
-import { ref, push, onChildAdded } from 'firebase/database'
+import { ref, push, onChildAdded, onValue, remove } from 'firebase/database'
 import { rtdb } from '../firebase/config'
 
 const ROOM_ID = 'test-session-123'
@@ -26,18 +26,19 @@ export default function Canvas({ backgroundImage }) {
     setCtx(context)
 
     const handleResize = () => {
-       // Note: sophisticated resize logic requires redraw array. Simplified for MVP.
        canvas.width = canvas.parentElement.clientWidth
        canvas.height = canvas.parentElement.clientHeight
        context.lineCap = 'round'
        context.lineJoin = 'round'
        context.lineWidth = 4
        context.strokeStyle = '#ec4899'
+       // A resize wipes the local canvas, but we will fix that in Task 2 properly.
     }
     window.addEventListener('resize', handleResize)
 
-    // Setup Firebase Listener
     const strokesRef = ref(rtdb, `sessions/${ROOM_ID}/strokes`)
+
+    // Listen for NEW strokes
     const unsubscribeStrokes = onChildAdded(strokesRef, (snapshot) => {
        const seg = snapshot.val()
        if (!seg) return
@@ -48,12 +49,22 @@ export default function Canvas({ backgroundImage }) {
        context.strokeStyle = seg.color || '#ec4899'
        context.lineWidth = seg.width || 4
        context.stroke()
+       
+       // Reset active context styling back
+       context.strokeStyle = '#ec4899'
+    })
+
+    // Listen for FULL DB wipings (like clicking Clear)
+    const unsubscribeValue = onValue(strokesRef, (snapshot) => {
+        if (!snapshot.exists()) {
+           context.clearRect(0, 0, canvas.width, canvas.height)
+        }
     })
 
     return () => {
        window.removeEventListener('resize', handleResize)
-       // Note: unsubscribe function returned by onChildAdded
        unsubscribeStrokes()
+       unsubscribeValue()
     }
   }, [])
 
@@ -93,6 +104,15 @@ export default function Canvas({ backgroundImage }) {
     isDrawing.current = false
   }
 
+  const clearCanvas = () => {
+     if (ctx && canvasRef.current) {
+        // Wipe local immediately for UX speed
+        ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height)
+        // Wipe Firebase State
+        remove(ref(rtdb, `sessions/${ROOM_ID}/strokes`))
+     }
+  }
+
   return (
     <div className="relative w-full h-full overflow-hidden bg-gray-950">
       {backgroundImage && (
@@ -115,7 +135,11 @@ export default function Canvas({ backgroundImage }) {
          <button className="w-8 h-8 rounded-full bg-accent hover:scale-110 shadow-lg shadow-accent/50 transition-all" title="Pen" />
          <button className="w-8 h-8 rounded-full bg-primary hover:scale-110 shadow-lg shadow-primary/50 transition-all" title="Marker" />
          <div className="w-px h-6 bg-white/20 mx-2" />
-         <button className="px-4 py-1 text-sm font-medium bg-red-500/20 text-red-400 hover:bg-red-500/40 rounded-full transition-colors">Clear</button>
+         <button 
+           onClick={clearCanvas} 
+           className="px-4 py-1 text-sm font-medium bg-red-500/20 text-red-400 hover:bg-red-500/40 rounded-full transition-colors">
+            Clear
+         </button>
       </div>
     </div>
   )
