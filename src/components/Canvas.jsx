@@ -1,4 +1,8 @@
 import React, { useRef, useEffect, useState } from 'react'
+import { ref, push, onChildAdded } from 'firebase/database'
+import { rtdb } from '../firebase/config'
+
+const ROOM_ID = 'test-session-123'
 
 export default function Canvas({ backgroundImage }) {
   const canvasRef = useRef(null)
@@ -22,7 +26,7 @@ export default function Canvas({ backgroundImage }) {
     setCtx(context)
 
     const handleResize = () => {
-       // Currently simplistic resize logic, would need to save/restore image data for real app
+       // Note: sophisticated resize logic requires redraw array. Simplified for MVP.
        canvas.width = canvas.parentElement.clientWidth
        canvas.height = canvas.parentElement.clientHeight
        context.lineCap = 'round'
@@ -31,7 +35,26 @@ export default function Canvas({ backgroundImage }) {
        context.strokeStyle = '#ec4899'
     }
     window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
+
+    // Setup Firebase Listener
+    const strokesRef = ref(rtdb, `sessions/${ROOM_ID}/strokes`)
+    const unsubscribeStrokes = onChildAdded(strokesRef, (snapshot) => {
+       const seg = snapshot.val()
+       if (!seg) return
+       
+       context.beginPath()
+       context.moveTo(seg.startX, seg.startY)
+       context.lineTo(seg.endX, seg.endY)
+       context.strokeStyle = seg.color || '#ec4899'
+       context.lineWidth = seg.width || 4
+       context.stroke()
+    })
+
+    return () => {
+       window.removeEventListener('resize', handleResize)
+       // Note: unsubscribe function returned by onChildAdded
+       unsubscribeStrokes()
+    }
   }, [])
 
   const startDrawing = (e) => {
@@ -45,13 +68,25 @@ export default function Canvas({ backgroundImage }) {
     if (!isDrawing.current || !ctx) return
     const { offsetX, offsetY } = e.nativeEvent
 
+    const startX = lastPos.current.x
+    const startY = lastPos.current.y
+    const endX = offsetX
+    const endY = offsetY
+
+    // Draw locally immediately for smoothness
     ctx.beginPath()
-    ctx.moveTo(lastPos.current.x, lastPos.current.y)
-    ctx.lineTo(offsetX, offsetY)
+    ctx.moveTo(startX, startY)
+    ctx.lineTo(endX, endY)
     ctx.stroke()
 
+    // Send to Firebase
+    push(ref(rtdb, `sessions/${ROOM_ID}/strokes`), {
+       startX, startY, endX, endY,
+       color: ctx.strokeStyle,
+       width: ctx.lineWidth
+    })
+
     lastPos.current = { x: offsetX, y: offsetY }
-    // Note: Here is where we would normally push these strokes to Firebase RTDB for Scrimba playback
   }
 
   const stopDrawing = () => {
