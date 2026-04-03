@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState } from 'react'
 import { ref, push, onChildAdded, onValue, remove } from 'firebase/database'
 import { rtdb } from '../firebase/config'
 import { Pencil, Minus, Square, Triangle, Ruler, Type, Grid, Trash2 } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
 
 const ROOM_ID = 'test-session-123'
 
@@ -12,20 +13,27 @@ const COLORS = [
 
 const WIDTHS = [2, 4, 8]
 
-export default function Canvas({ backgroundImage }) {
+export default function Canvas({ backgroundImage, theme = 'dark' }) {
   const canvasRef = useRef(null)
   
   const [ctx, setCtx] = useState(null)
   const [tool, setTool] = useState('pen') // pen, line, rect, triangle, ruler, text
-  const [color, setColor] = useState('#ec4899')
+  const [color, setColor] = useState(theme === 'dark' ? '#ec4899' : '#3b82f6')
   const [width, setWidth] = useState(4)
   const [textInput, setTextInput] = useState(null)
-  const [showGrid, setShowGrid] = useState(false)
+  const [showGrid, setShowGrid] = useState(true)
+  const [showRulerGuide, setShowRulerGuide] = useState(false)
 
   const isDrawing = useRef(false)
   const startPos = useRef({ x: 0, y: 0 })
   const lastPos = useRef({ x: 0, y: 0 })
   const objectsRef = useRef([])
+
+  // Ensure color remains readable if user switches theme while drawing
+  useEffect(() => {
+    if (theme === 'light' && color === '#ffffff') setColor('#000000')
+    if (theme === 'dark' && color === '#000000') setColor('#ffffff')
+  }, [theme])
 
   // Init canvas and Firebase listeners
   useEffect(() => {
@@ -72,7 +80,7 @@ export default function Canvas({ backgroundImage }) {
        unsubscribeStrokes()
        unsubscribeValue()
     }
-  }, []) // Empty dep array for one-time initialization
+  }, [])
 
   const redrawAll = (context = ctx, objects = objectsRef.current) => {
      if (!context || !canvasRef.current) return
@@ -113,7 +121,7 @@ export default function Canvas({ backgroundImage }) {
          const midY = (obj.startY + obj.endY) / 2
          const dist = Math.round(Math.sqrt(Math.pow(obj.endX - obj.startX, 2) + Math.pow(obj.endY - obj.startY, 2)))
          context.font = 'bold 12px sans-serif'
-         context.fillStyle = '#ffffff'
+         context.fillStyle = theme === 'dark' ? '#ffffff' : '#000000'
          context.fillText(`${dist}px`, midX + 10, midY)
       } else if (obj.type === 'text') {
          context.font = `${obj.width * 6 + 10}px sans-serif`
@@ -184,7 +192,7 @@ export default function Canvas({ backgroundImage }) {
             ctx.stroke()
             const dist = Math.round(Math.sqrt(Math.pow(offsetX - startPos.current.x, 2) + Math.pow(offsetY - startPos.current.y, 2)))
             ctx.font = 'bold 12px sans-serif'
-            ctx.fillStyle = '#ffffff'
+            ctx.fillStyle = theme === 'dark' ? '#ffffff' : '#000000'
             ctx.fillText(`${dist}px`, (startPos.current.x + offsetX) / 2 + 10, (startPos.current.y + offsetY) / 2)
         }
     }
@@ -204,7 +212,7 @@ export default function Canvas({ backgroundImage }) {
            color, width
         }
         push(ref(rtdb, `sessions/${ROOM_ID}/strokes`), lineObj)
-        redrawAll() // Redraw triggers normally via onChildAdded, but we ensure cleanliness
+        redrawAll()
     } else if (tool === 'rect') {
         const rectObj = {
            type: 'rect',
@@ -251,19 +259,19 @@ export default function Canvas({ backgroundImage }) {
   }
 
   const clearCanvas = () => {
-     if (ctx && canvasRef.current) {
-        // Wipe Firebase State. Remote wipes local through the onValue listener.
-        remove(ref(rtdb, `sessions/${ROOM_ID}/strokes`))
-     }
+     if (ctx && canvasRef.current) remove(ref(rtdb, `sessions/${ROOM_ID}/strokes`))
   }
 
   return (
-    <div className="relative w-full h-full overflow-hidden bg-white/5">
+    <div className={`relative w-full h-full overflow-hidden transition-colors duration-500 ${theme === 'dark' ? 'bg-gray-950' : 'bg-white'}`}>
+      
       {/* Grid Overlay */}
       <div 
         className={`absolute inset-0 pointer-events-none transition-opacity duration-300 ${showGrid ? 'opacity-100' : 'opacity-0'}`}
         style={{ 
-           backgroundImage: 'linear-gradient(to right, rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.05) 1px, transparent 1px)', 
+           backgroundImage: theme === 'dark' 
+              ? 'linear-gradient(to right, rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.05) 1px, transparent 1px)'
+              : 'linear-gradient(to right, rgba(0,0,0,0.05) 1px, transparent 1px), linear-gradient(to bottom, rgba(0,0,0,0.05) 1px, transparent 1px)', 
            backgroundSize: '40px 40px' 
         }} 
       />
@@ -274,6 +282,28 @@ export default function Canvas({ backgroundImage }) {
           style={{ backgroundImage: `url(${backgroundImage})` }}
         />
       )}
+
+      {/* Draggable Straightedge Ruler Guide */}
+      <AnimatePresence>
+        {showRulerGuide && (
+          <motion.div
+            drag
+            dragMomentum={false}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.8 }}
+            className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-40 w-[600px] h-12 cursor-grab active:cursor-grabbing border-y-2 flex items-center px-4 overflow-hidden shadow-2xl backdrop-blur-xl transition-colors
+                      ${theme === 'dark' ? 'bg-gray-800/80 border-primary text-gray-300' : 'bg-white/80 border-primary text-gray-500'}`}
+          >
+             <div className="flex-grow flex justify-between select-none font-mono text-[10px] opacity-60">
+                {Array.from({ length: 60 }).map((_, i) => (
+                   <div key={i} className={`h-2 w-px ${i % 5 === 0 ? 'h-4 bg-primary' : 'bg-gray-500'}`} />
+                ))}
+             </div>
+             <div className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-bold tracking-widest pointer-events-none">STRAIGHTEDGE GUIDE</div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       
       <canvas
         ref={canvasRef}
@@ -284,29 +314,10 @@ export default function Canvas({ backgroundImage }) {
         className="w-full h-full cursor-crosshair relative z-10"
       />
 
-      {/* Floating Text Input Box */}
-      {textInput && (
-         <form 
-            onSubmit={handleTextSubmit} 
-            className="absolute z-30"
-            style={{ left: textInput.x, top: textInput.y - 12 }}
-         >
-            <input 
-               autoFocus
-               type="text" 
-               className="bg-surface/90 border border-primary text-white px-2 py-1 outline-none shadow-xl rounded"
-               style={{ color: color, fontSize: `${width * 6 + 10}px` }}
-               value={textInput.value}
-               onChange={(e) => setTextInput({ ...textInput, value: e.target.value })}
-               onBlur={handleTextSubmit}
-            />
-         </form>
-      )}
-      
-      {/* Dynamic Toolbar */}
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 bg-surface/90 backdrop-blur-md px-6 py-3 rounded-full border border-white/10 shadow-2xl flex items-center gap-6">
+      {/* Toolbar */}
+      <div className={`absolute top-4 left-1/2 -translate-x-1/2 z-20 backdrop-blur-md px-6 py-3 rounded-full border shadow-2xl flex items-center gap-6 transition-all duration-300
+                      ${theme === 'dark' ? 'bg-surface/90 border-white/10' : 'bg-white/90 border-gray-200'}`}>
          
-         {/* Tools Icons */}
          <div className="flex items-center gap-2">
             {[
               { id: 'pen', icon: Pencil },
@@ -320,7 +331,8 @@ export default function Canvas({ backgroundImage }) {
                   key={t.id}
                   onClick={() => setTool(t.id)}
                   className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all
-                              ${tool === t.id ? 'bg-primary text-white shadow-lg shadow-primary/50' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}
+                              ${tool === t.id ? 'bg-primary text-white shadow-lg shadow-primary/50' : 'hover:bg-primary/10'} 
+                              ${theme === 'dark' && tool !== t.id ? 'text-gray-400' : 'text-gray-600'}`}
                   title={t.id}
                 >
                   <t.icon size={18} strokeWidth={2.5} />
@@ -328,56 +340,64 @@ export default function Canvas({ backgroundImage }) {
             ))}
          </div>
 
-         <div className="w-px h-6 bg-white/20 mx-1" />
+         <div className={`w-px h-6 mx-1 ${theme === 'dark' ? 'bg-white/20' : 'bg-gray-200'}`} />
 
-         {/* Colors */}
          <div className="flex items-center gap-1">
             {COLORS.map(c => (
                 <button 
                   key={c}
                   onClick={() => setColor(c)}
-                  className={`w-6 h-6 rounded-full transition-transform ${color === c ? 'scale-125 ring-2 ring-white ring-offset-2 ring-offset-surface' : 'hover:scale-110'}`}
+                  className={`w-6 h-6 rounded-full transition-transform ${color === c ? 'scale-125 ring-2 ring-white ring-offset-2 ring-offset-primary' : 'hover:scale-110'}`}
                   style={{ backgroundColor: c }}
                   title={c}
                 />
             ))}
          </div>
 
-         <div className="w-px h-6 bg-white/20 mx-1" />
-
-         {/* Thickness */}
-         <div className="flex items-center gap-2">
-            {WIDTHS.map(w => (
-                <button 
-                  key={w}
-                  onClick={() => setWidth(w)}
-                  className={`w-8 h-8 rounded flex items-center justify-center transition-colors
-                              ${width === w ? 'bg-white/20' : 'hover:bg-white/10'}`}
-                >
-                  <div className="bg-gray-300 rounded-full" style={{ width: w + 2, height: w + 2 }} />
-                </button>
-            ))}
-         </div>
-
-         <div className="w-px h-6 bg-white/20 mx-1" />
+         <div className={`w-px h-6 mx-1 ${theme === 'dark' ? 'bg-white/20' : 'bg-gray-200'}`} />
 
          <button 
            onClick={() => setShowGrid(!showGrid)}
-           className={`px-3 py-1.5 text-sm font-semibold rounded-lg transition-colors
-                      ${showGrid ? 'bg-primary text-white shadow-lg' : 'bg-white/10 text-gray-300 hover:bg-white/20'}`}>
-            Grid
+           className={`p-2 rounded-lg transition-all ${showGrid ? 'bg-primary text-white' : 'hover:bg-primary/10'} 
+                      ${theme === 'dark' && !showGrid ? 'text-gray-400' : 'text-gray-600'}`}
+           title="Toggle Grid"
+          >
+            <Grid size={20} />
          </button>
 
-         <div className="w-px h-6 bg-white/20 mx-1" />
+         <button 
+           onClick={() => setShowRulerGuide(!showRulerGuide)}
+           className={`p-2 rounded-lg transition-all ${showRulerGuide ? 'bg-primary text-white' : 'hover:bg-primary/10'} 
+                      ${theme === 'dark' && !showRulerGuide ? 'text-gray-400' : 'text-gray-600'}`}
+           title="Toggle Straightedge Guide"
+          >
+            <Ruler size={20} className="rotate-45" />
+         </button>
+
+         <div className={`w-px h-6 mx-1 ${theme === 'dark' ? 'bg-white/20' : 'bg-gray-200'}`} />
 
          <button 
            onClick={clearCanvas} 
-           className="p-2 text-red-400 hover:bg-red-500 hover:text-white rounded-full transition-all group"
+           className="p-2 text-red-500 hover:bg-red-500 hover:text-white rounded-full transition-all group"
            title="Clear All"
           >
             <Trash2 size={20} className="group-hover:scale-110 transition-transform" />
          </button>
       </div>
+
+      {textInput && (
+         <form onSubmit={handleTextSubmit} className="absolute z-30" style={{ left: textInput.x, top: textInput.y - 12 }}>
+            <input 
+               autoFocus
+               type="text" 
+               className={`border border-primary px-2 py-1 outline-none shadow-xl rounded ${theme === 'dark' ? 'bg-gray-950/90 text-white' : 'bg-white/90 text-black'}`}
+               style={{ color: color, fontSize: `${width * 6 + 10}px` }}
+               value={textInput.value}
+               onChange={(e) => setTextInput({ ...textInput, value: e.target.value })}
+               onBlur={handleTextSubmit}
+            />
+         </form>
+      )}
     </div>
   )
 }
