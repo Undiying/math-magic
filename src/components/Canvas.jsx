@@ -46,6 +46,14 @@ const Canvas = forwardRef(({ backgroundImage, theme = 'dark', onRecordingStatusC
   const startPos = useRef({ x: 0, y: 0 })
   const lastPos = useRef({ x: 0, y: 0 })
   const objectsRef = useRef([])
+  const prerenderedBgRef = useRef(null)
+  
+  const offsetRef = useRef(offset)
+  const scaleRef = useRef(scale)
+  useEffect(() => {
+    offsetRef.current = offset
+    scaleRef.current = scale
+  }, [offset, scale])
 
   // Coordinate Conversion
   const toWorld = (screenX, screenY) => ({
@@ -93,11 +101,7 @@ const Canvas = forwardRef(({ backgroundImage, theme = 'dark', onRecordingStatusC
        setPlaybackStartTime(Date.now() - playbackPausedTime)
        startPlayback(strokes, playbackPausedTime)
     },
-    clearCanvas: () => {
-      objectsRef.current = []
-      storage.clearStrokes()
-      redrawAll()
-    },
+    clearCanvas: () => handleClearCanvas(),
     centerView: () => {
       setOffset({ x: 0, y: 0 })
       setScale(1)
@@ -105,6 +109,13 @@ const Canvas = forwardRef(({ backgroundImage, theme = 'dark', onRecordingStatusC
     getCanvas: () => canvasRef.current,
     getObjects: () => objectsRef.current
   }))
+
+  const handleClearCanvas = () => {
+      objectsRef.current = []
+      storage.clearStrokes()
+      redrawAll()
+  }
+
 
   const startPlayback = (strokes, startFrom = 0) => {
     setIsPlaying(true)
@@ -170,7 +181,9 @@ const Canvas = forwardRef(({ backgroundImage, theme = 'dark', onRecordingStatusC
        bgCanvas.width = w
        bgCanvas.height = h
        redrawAll(context, objectsRef.current)
-       if (backgroundImage) renderBackground(bgCanvas.getContext('2d'), backgroundImage)
+       if (bgCanvas.getContext('2d') && prerenderedBgRef.current) {
+          redrawBg(bgCanvas.getContext('2d'))
+       }
     }
 
     window.addEventListener('resize', resize)
@@ -184,53 +197,75 @@ const Canvas = forwardRef(({ backgroundImage, theme = 'dark', onRecordingStatusC
     return () => window.removeEventListener('resize', resize)
   }, [])
 
-  useEffect(() => {
-    if (bgCtx && backgroundImage) {
-      renderBackground(bgCtx, backgroundImage)
-    } else if (bgCtx) {
-      bgCtx.clearRect(0, 0, bgCanvasRef.current.width, bgCanvasRef.current.height)
-    }
-  }, [backgroundImage, bgCtx, offset, scale])
-
-  useEffect(() => {
-    redrawAll()
-  }, [offset, scale])
-
-  const renderBackground = async (context, source) => {
+  const redrawBg = (context = bgCtx) => {
+    if (!context || !bgCanvasRef.current || !prerenderedBgRef.current) return
     const canvas = bgCanvasRef.current
     context.clearRect(0, 0, canvas.width, canvas.height)
     
     context.save()
-    context.translate(offset.x, offset.y)
-    context.scale(scale, scale)
+    context.translate(offsetRef.current.x, offsetRef.current.y)
+    context.scale(scaleRef.current, scaleRef.current)
 
-    if (source.includes('application/pdf')) {
-      try {
-        const loadingTask = pdfjsLib.getDocument(source)
-        const pdf = await loadingTask.promise
-        const page = await pdf.getPage(1)
-        
-        const viewport = page.getViewport({ scale: 1 })
-        const docScale = Math.min(canvas.width / (viewport.width || 1), canvas.height / (viewport.height || 1))
-        const scaledViewport = page.getViewport({ scale: docScale || 1 })
-        
-        await page.render({
-          canvasContext: context,
-          viewport: scaledViewport
-        }).promise
-      } catch (err) {
-        console.error("PDF Render Error:", err)
-      }
-    } else {
-      const img = new Image()
-      img.onload = () => {
-        const docScale = Math.min(canvas.width / img.width, canvas.height / img.height)
-        context.drawImage(img, 0, 0, img.width * docScale, img.height * docScale)
-      }
-      img.src = source
-    }
+    const bg = prerenderedBgRef.current
+    const docScale = Math.min(canvas.width / (bg.width || 1), canvas.height / (bg.height || 1))
+    
+    context.drawImage(bg, 0, 0, bg.width * docScale, bg.height * docScale)
     context.restore()
   }
+
+  useEffect(() => {
+    const loadBackground = async () => {
+      if (!backgroundImage) {
+        prerenderedBgRef.current = null
+        if (bgCtx && bgCanvasRef.current) {
+            bgCtx.clearRect(0, 0, bgCanvasRef.current.width, bgCanvasRef.current.height)
+        }
+        return
+      }
+
+      const offscreen = document.createElement('canvas')
+      const ctx = offscreen.getContext('2d')
+
+      if (backgroundImage.includes('application/pdf')) {
+        try {
+          const loadingTask = pdfjsLib.getDocument(backgroundImage)
+          const pdf = await loadingTask.promise
+          const page = await pdf.getPage(1)
+          
+          const viewport = page.getViewport({ scale: 2 }) // 2x scale for crispness when zooming
+          offscreen.width = viewport.width
+          offscreen.height = viewport.height
+          
+          await page.render({
+            canvasContext: ctx,
+            viewport: viewport
+          }).promise
+          
+          prerenderedBgRef.current = offscreen
+          redrawBg()
+        } catch (err) {
+          console.error("PDF Render Error:", err)
+        }
+      } else {
+        const img = new Image()
+        img.onload = () => {
+          offscreen.width = img.width
+          offscreen.height = img.height
+          ctx.drawImage(img, 0, 0)
+          prerenderedBgRef.current = offscreen
+          redrawBg()
+        }
+        img.src = backgroundImage
+      }
+    }
+
+    loadBackground()
+  }, [backgroundImage, bgCtx]) // Dependency on bgCtx ensuring it runs after canvas is ready
+
+  useEffect(() => {
+    redrawBg()
+    redrawAll()
+  }, [offset, scale])
 
   const redrawAll = (context = ctxRef.current, objects = objectsRef.current) => {
      if (!context || !canvasRef.current) return
@@ -602,6 +637,16 @@ const Canvas = forwardRef(({ backgroundImage, theme = 'dark', onRecordingStatusC
            title="Toggle Grid"
           >
             <Grid size={20} />
+         </button>
+
+         <div className={`w-px h-6 mx-1 ${theme === 'dark' ? 'bg-white/20' : 'bg-gray-200'}`} />
+
+         <button 
+           onClick={handleClearCanvas}
+           className={`p-2 rounded-lg transition-all ${theme === 'dark' ? 'text-gray-400 hover:text-red-400 hover:bg-red-400/10' : 'text-gray-500 hover:text-red-500 hover:bg-red-500/10'}`}
+           title="Clear Everything"
+          >
+            <Trash2 size={20} />
          </button>
       </div>
     </div>
