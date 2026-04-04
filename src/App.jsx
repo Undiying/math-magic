@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react'
 import Sidebar from './components/Sidebar'
 import Canvas from './components/Canvas'
-import { Sun, Moon, ChevronLeft, ChevronRight, Circle, Square, Play, Pause, Trash2, Download, FileText, Triangle as TriangleIcon } from 'lucide-react'
+import { Sun, Moon, ChevronLeft, ChevronRight, Circle, Square, Play, Pause, Trash2, Download, FileText } from 'lucide-react'
 import { jsPDF } from 'jspdf'
 
 function App() {
@@ -10,7 +10,6 @@ function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const [theme, setTheme] = useState('dark') 
   const [recordingStatus, setRecordingStatus] = useState('idle') // idle, recording, playing, paused
-  const [triangleType, setTriangleType] = useState('right') // 'right' or 'normal'
   const [selectedStrokes, setSelectedStrokes] = useState(null)
 
   const canvasRef = useRef(null)
@@ -65,28 +64,8 @@ function App() {
               ref={canvasRef}
               backgroundImage={activeBackground} 
               theme={theme} 
-              triangleType={triangleType}
               onRecordingStatusChange={setRecordingStatus}
            />
-
-           {/* Triangle Mode Toggle */}
-           <div className={`absolute top-24 left-6 z-50 p-1 rounded-xl border flex flex-col gap-1 shadow-2xl transition-all duration-300
-                            ${theme === 'dark' ? 'bg-surface border-gray-700' : 'bg-white border-gray-200'}`}>
-              <button 
-                onClick={() => setTriangleType('right')} 
-                className={`p-2 rounded-lg transition-all ${triangleType === 'right' ? 'bg-primary text-white shadow-lg shadow-primary/40' : 'text-gray-500 hover:bg-primary/10'}`}
-                title="Right-Angle Triangle"
-              >
-                <div className="w-5 h-5 flex items-center justify-center font-bold text-[10px]">L</div>
-              </button>
-              <button 
-                onClick={() => setTriangleType('normal')} 
-                className={`p-2 rounded-lg transition-all ${triangleType === 'normal' ? 'bg-primary text-white shadow-lg shadow-primary/40' : 'text-gray-500 hover:bg-primary/10'}`}
-                title="Isosceles Triangle"
-              >
-                <TriangleIcon size={18} />
-              </button>
-           </div>
 
            {/* Recording Controls (Floating at Bottom) */}
            <div className={`absolute bottom-6 left-1/2 -translate-x-1/2 z-50 backdrop-blur-xl px-6 py-3 rounded-2xl border shadow-2xl flex items-center gap-6 transition-all duration-300

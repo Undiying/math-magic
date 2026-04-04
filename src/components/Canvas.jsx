@@ -12,7 +12,7 @@ const COLORS = [
   '#eab308', '#000000', '#ffffff', '#f11d28', '#a855f7'
 ]
 
-const Canvas = forwardRef(({ backgroundImage, theme = 'dark', onRecordingStatusChange, triangleType = 'right' }, ref) => {
+const Canvas = forwardRef(({ backgroundImage, theme = 'dark', onRecordingStatusChange }, ref) => {
   const canvasRef = useRef(null)
   const bgCanvasRef = useRef(null)
   const containerRef = useRef(null)
@@ -25,6 +25,7 @@ const Canvas = forwardRef(({ backgroundImage, theme = 'dark', onRecordingStatusC
   const [width, setWidth] = useState(4)
   const [textInput, setTextInput] = useState(null)
   const [showGrid, setShowGrid] = useState(true)
+  const [triangleType, setTriangleType] = useState('right') // 'right' or 'normal'
 
   // Infinite Canvas State
   const [offset, setOffset] = useState({ x: 0, y: 0 })
@@ -458,6 +459,34 @@ const Canvas = forwardRef(({ backgroundImage, theme = 'dark', onRecordingStatusC
         className={`relative w-full h-full overflow-hidden transition-colors duration-500 ${theme === 'dark' ? 'bg-gray-950' : 'bg-white'}`}
     >
       
+      {/* Triangle Tool Sub-menu */}
+      <AnimatePresence>
+        {tool === 'triangle' && (
+           <motion.div 
+             initial={{ opacity: 0, x: -20 }}
+             animate={{ opacity: 1, x: 0 }}
+             exit={{ opacity: 0, x: -20 }}
+             className={`absolute top-24 left-6 z-50 p-1 rounded-xl border flex flex-col gap-1 shadow-2xl duration-300
+                              ${theme === 'dark' ? 'bg-surface border-gray-700' : 'bg-white border-gray-200'}`}
+           >
+              <button 
+                onClick={() => setTriangleType('right')} 
+                className={`p-2 rounded-lg transition-all ${triangleType === 'right' ? 'bg-primary text-white shadow-lg shadow-primary/40' : 'text-gray-500 hover:bg-primary/10'}`}
+                title="Right-Angle Triangle"
+              >
+                <div className="w-5 h-5 flex items-center justify-center font-bold text-[10px]">L</div>
+              </button>
+              <button 
+                onClick={() => setTriangleType('normal')} 
+                className={`p-2 rounded-lg transition-all ${triangleType === 'normal' ? 'bg-primary text-white shadow-lg shadow-primary/40' : 'text-gray-500 hover:bg-primary/10'}`}
+                title="Isosceles Triangle"
+              >
+                <TriangleIcon size={18} />
+              </button>
+           </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Grid Overlay */}
       <div 
         className={`absolute inset-0 pointer-events-none transition-opacity duration-300 ${showGrid ? 'opacity-100' : 'opacity-0'}`}
