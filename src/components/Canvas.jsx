@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useImperativeHandle, forwardRef } from 'react'
-import { Pencil, Minus, Square, Triangle as TriangleIcon, Ruler, Type, Grid, Trash2, Maximize, ZoomIn, ZoomOut } from 'lucide-react'
+import { Pencil, Minus, Square, Triangle as TriangleIcon, Ruler, Type, Grid, Trash2, Maximize, ZoomIn, ZoomOut, Eraser } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import * as pdfjsLib from 'pdfjs-dist'
 import { storage } from '../utils/storage'
@@ -250,7 +250,15 @@ const Canvas = forwardRef(({ backgroundImage, theme = 'dark', onRecordingStatusC
       context.lineWidth = obj.width || 4
       context.fillStyle = obj.color || '#ec4899'
 
-      if (obj.type === 'segment') {
+      if (obj.type === 'eraser') {
+         context.globalCompositeOperation = 'destination-out'
+         context.lineWidth = (obj.width || 4) * 5
+         context.strokeStyle = 'rgba(0,0,0,1)'
+         context.moveTo(obj.startX, obj.startY)
+         context.lineTo(obj.endX, obj.endY)
+         context.stroke()
+         context.globalCompositeOperation = 'source-over'
+      } else if (obj.type === 'segment') {
          context.moveTo(obj.startX, obj.startY)
          context.lineTo(obj.endX, obj.endY)
          context.stroke()
@@ -342,9 +350,9 @@ const Canvas = forwardRef(({ backgroundImage, theme = 'dark', onRecordingStatusC
     const rect = canvasRef.current.getBoundingClientRect()
     const mouse = toWorld(clientX - rect.left, clientY - rect.top)
 
-    if (tool === 'pen') {
+    if (tool === 'pen' || tool === 'eraser') {
         addObject({
-           type: 'segment',
+           type: tool === 'pen' ? 'segment' : 'eraser',
            startX: lastPos.current.x, startY: lastPos.current.y,
            endX: mouse.x, endY: mouse.y,
            color, width
@@ -526,7 +534,8 @@ const Canvas = forwardRef(({ backgroundImage, theme = 'dark', onRecordingStatusC
               { id: 'rect', icon: Square },
               { id: 'triangle', icon: TriangleIcon },
               { id: 'ruler', icon: Ruler },
-              { id: 'text', icon: Type }
+              { id: 'text', icon: Type },
+              { id: 'eraser', icon: Eraser }
             ].map(t => (
                 <button 
                   key={t.id}

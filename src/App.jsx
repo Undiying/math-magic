@@ -143,6 +143,14 @@ function App() {
                 <FileText size={20} />
               </button>
 
+              <button 
+                onClick={() => canvasRef.current?.clearCanvas()}
+                className={`p-2 rounded-xl transition-all ${theme === 'dark' ? 'text-gray-400 hover:text-red-400 hover:bg-red-400/10' : 'text-gray-500 hover:text-red-500 hover:bg-red-500/10'}`}
+                title="Clear All"
+              >
+                <Trash2 size={20} />
+              </button>
+
               <div className="flex items-center gap-2 min-w-[80px]">
                 {recordingStatus === 'recording' && <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />}
                 {recordingStatus === 'playing' && <div className="w-2 h-2 bg-primary rounded-full animate-pulse" />}
