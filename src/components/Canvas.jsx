@@ -1,88 +1,199 @@
-import React, { useRef, useEffect, useState } from 'react'
-import { ref, push, onChildAdded, onValue, remove } from 'firebase/database'
-import { rtdb } from '../firebase/config'
+import React, { useRef, useEffect, useState, useImperativeHandle, forwardRef } from 'react'
 import { Pencil, Minus, Square, Triangle, Ruler, Type, Grid, Trash2 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
+import * as pdfjsLib from 'pdfjs-dist'
+import { storage } from '../utils/storage'
 
-const ROOM_ID = 'test-session-123'
+// Set PDF.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`
 
 const COLORS = [
   '#ec4899', '#f87171', '#3b82f6', '#22c55e', 
   '#eab308', '#000000', '#ffffff', '#f11d28', '#a855f7'
 ]
 
-const WIDTHS = [2, 4, 8]
-
-export default function Canvas({ backgroundImage, theme = 'dark' }) {
+const Canvas = forwardRef(({ backgroundImage, theme = 'dark', onRecordingStatusChange }, ref) => {
   const canvasRef = useRef(null)
+  const bgCanvasRef = useRef(null)
+  const containerRef = useRef(null)
   
   const [ctx, setCtx] = useState(null)
-  const [tool, setTool] = useState('pen') // pen, line, rect, triangle, ruler, text
+  const [bgCtx, setBgCtx] = useState(null)
+  const [tool, setTool] = useState('pen') 
   const [color, setColor] = useState(theme === 'dark' ? '#ec4899' : '#3b82f6')
   const [width, setWidth] = useState(4)
   const [textInput, setTextInput] = useState(null)
   const [showGrid, setShowGrid] = useState(true)
   const [showRulerGuide, setShowRulerGuide] = useState(false)
 
+  // Recording & Playback State
+  const [isRecording, setIsRecording] = useState(false)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [recordingStartTime, setRecordingStartTime] = useState(null)
+  const [currentRecording, setCurrentRecording] = useState([])
+  const playbackTimerRef = useRef(null)
+
   const isDrawing = useRef(false)
   const startPos = useRef({ x: 0, y: 0 })
   const lastPos = useRef({ x: 0, y: 0 })
   const objectsRef = useRef([])
 
-  // Ensure color remains readable if user switches theme while drawing
+  // Expose methods to parent via ref
+  useImperativeHandle(ref, () => ({
+    startRecording: () => {
+      setIsRecording(true)
+      setRecordingStartTime(Date.now())
+      setCurrentRecording([])
+      if (onRecordingStatusChange) onRecordingStatusChange('recording')
+    },
+    stopRecording: async () => {
+      setIsRecording(false)
+      if (currentRecording.length > 0) {
+        await storage.saveRecording({
+          name: `Recording ${new Date().toLocaleString()}`,
+          strokes: currentRecording
+        })
+      }
+      if (onRecordingStatusChange) onRecordingStatusChange('idle')
+    },
+    playLastRecording: async () => {
+      const recordings = await storage.getRecordings()
+      if (recordings.length === 0) return
+      const last = recordings[recordings.length - 1]
+      startPlayback(last.strokes)
+    },
+    pausePlayback: () => {
+      setIsPlaying(false)
+      if (playbackTimerRef.current) clearInterval(playbackTimerRef.current)
+      if (onRecordingStatusChange) onRecordingStatusChange('paused')
+    },
+    clearCanvas: () => {
+      objectsRef.current = []
+      storage.clearStrokes()
+      redrawAll()
+    }
+  }))
+
+  const startPlayback = (strokes) => {
+    setIsPlaying(true)
+    objectsRef.current = []
+    redrawAll()
+    
+    let index = 0
+    const startTime = Date.now()
+    
+    if (playbackTimerRef.current) clearInterval(playbackTimerRef.current)
+    
+    playbackTimerRef.current = setInterval(() => {
+      const elapsed = Date.now() - startTime
+      while (index < strokes.length && strokes[index].timestamp <= elapsed) {
+        const obj = strokes[index]
+        objectsRef.current.push(obj)
+        drawObject(ctxRef.current, obj) // Use ref for stable ctx
+        index++
+      }
+      
+      if (index >= strokes.length) {
+        clearInterval(playbackTimerRef.current)
+        setIsPlaying(false)
+        if (onRecordingStatusChange) onRecordingStatusChange('idle')
+      }
+    }, 16)
+    
+    if (onRecordingStatusChange) onRecordingStatusChange('playing')
+  }
+
+  // Use refs for context to avoid stale closures in listeners
+  const ctxRef = useRef(null)
+
+  // Ensure color remains readable
   useEffect(() => {
     if (theme === 'light' && color === '#ffffff') setColor('#000000')
     if (theme === 'dark' && color === '#000000') setColor('#ffffff')
-  }, [theme])
+  }, [theme, color])
 
-  // Init canvas and Firebase listeners
+  // Init canvas
   useEffect(() => {
     const canvas = canvasRef.current
-    if (!canvas) return
-    
-    // Set internal resolution
-    canvas.width = canvas.parentElement.clientWidth
-    canvas.height = canvas.parentElement.clientHeight
+    const bgCanvas = bgCanvasRef.current
+    if (!canvas || !bgCanvas) return
     
     const context = canvas.getContext('2d')
     context.lineCap = 'round'
     context.lineJoin = 'round'
     setCtx(context)
+    ctxRef.current = context
 
-    const handleResize = () => {
-       canvas.width = canvas.parentElement.clientWidth
-       canvas.height = canvas.parentElement.clientHeight
+    setBgCtx(bgCanvas.getContext('2d'))
+
+    const resize = () => {
+       const w = canvas.parentElement.clientWidth
+       const h = canvas.parentElement.clientHeight
+       canvas.width = w
+       canvas.height = h
+       bgCanvas.width = w
+       bgCanvas.height = h
        redrawAll(context, objectsRef.current)
+       if (backgroundImage) renderBackground(bgCanvas.getContext('2d'), backgroundImage)
     }
-    window.addEventListener('resize', handleResize)
 
-    const strokesRef = ref(rtdb, `sessions/${ROOM_ID}/strokes`)
+    window.addEventListener('resize', resize)
+    resize()
 
-    // Listen for FULL DB wipings (like clicking Clear)
-    const unsubscribeValue = onValue(strokesRef, (snapshot) => {
-        if (!snapshot.exists() && context) {
-           objectsRef.current = [];
-           context.clearRect(0, 0, canvas.width, canvas.height)
-        }
+    storage.getStrokes().then(strokes => {
+      objectsRef.current = strokes
+      redrawAll(context, strokes)
     })
 
-    // Listen for NEW objects individually so we don't fetch entire array over and over
-    const unsubscribeStrokes = onChildAdded(strokesRef, (snapshot) => {
-       const obj = snapshot.val()
-       if (!obj) return
-       
-       objectsRef.current.push(obj)
-       drawObject(context, obj)
-    })
-
-    return () => {
-       window.removeEventListener('resize', handleResize)
-       unsubscribeStrokes()
-       unsubscribeValue()
-    }
+    return () => window.removeEventListener('resize', resize)
   }, [])
 
-  const redrawAll = (context = ctx, objects = objectsRef.current) => {
+  // Background rendering
+  useEffect(() => {
+    if (bgCtx && backgroundImage) {
+      renderBackground(bgCtx, backgroundImage)
+    } else if (bgCtx) {
+      bgCtx.clearRect(0, 0, bgCanvasRef.current.width, bgCanvasRef.current.height)
+    }
+  }, [backgroundImage, bgCtx])
+
+  const renderBackground = async (context, source) => {
+    context.clearRect(0, 0, bgCanvasRef.current.width, bgCanvasRef.current.height)
+    
+    if (source.includes('application/pdf')) {
+      try {
+        const loadingTask = pdfjsLib.getDocument(source)
+        const pdf = await loadingTask.promise
+        const page = await pdf.getPage(1)
+        
+        const canvas = bgCanvasRef.current
+        const viewport = page.getViewport({ scale: 1 })
+        const scale = Math.min(canvas.width / viewport.width, canvas.height / viewport.height)
+        const scaledViewport = page.getViewport({ scale })
+        
+        const renderContext = {
+          canvasContext: context,
+          viewport: scaledViewport,
+          transform: [1, 0, 0, 1, (canvas.width - scaledViewport.width) / 2, (canvas.height - scaledViewport.height) / 2]
+        }
+        await page.render(renderContext).promise
+      } catch (err) {
+        console.error("PDF Render Error:", err)
+      }
+    } else {
+      const img = new Image()
+      img.onload = () => {
+        const canvas = bgCanvasRef.current
+        const scale = Math.min(canvas.width / img.width, canvas.height / img.height)
+        const x = (canvas.width / 2) - (img.width / 2) * scale
+        const y = (canvas.height / 2) - (img.height / 2) * scale
+        context.drawImage(img, x, y, img.width * scale, img.height * scale)
+      }
+      img.src = source
+    }
+  }
+
+  const redrawAll = (context = ctxRef.current, objects = objectsRef.current) => {
      if (!context || !canvasRef.current) return
      context.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height)
      objects.forEach(obj => drawObject(context, obj))
@@ -112,11 +223,9 @@ export default function Canvas({ backgroundImage, theme = 'dark' }) {
          context.closePath()
          context.stroke()
       } else if (obj.type === 'ruler') {
-         // Draw main line
          context.moveTo(obj.startX, obj.startY)
          context.lineTo(obj.endX, obj.endY)
          context.stroke()
-         // Draw measurement label
          const midX = (obj.startX + obj.endX) / 2
          const midY = (obj.startY + obj.endY) / 2
          const dist = Math.round(Math.sqrt(Math.pow(obj.endX - obj.startX, 2) + Math.pow(obj.endY - obj.startY, 2)))
@@ -124,17 +233,31 @@ export default function Canvas({ backgroundImage, theme = 'dark' }) {
          context.fillStyle = theme === 'dark' ? '#ffffff' : '#000000'
          context.fillText(`${dist}px`, midX + 10, midY)
       } else if (obj.type === 'text') {
-         context.font = `${obj.width * 6 + 10}px sans-serif`
-         context.fillText(obj.text, obj.x, obj.y)
+         context.font = `${obj.width * 4 + 16}px sans-serif`
+         context.fillText(obj.text, obj.x, obj.y + (obj.width * 4 + 16)/2)
       }
   }
 
+  const addObject = (obj) => {
+    if (isRecording) {
+      const timestamp = Date.now() - recordingStartTime
+      setCurrentRecording(prev => [...prev, { ...obj, timestamp }])
+    }
+    objectsRef.current.push(obj)
+    storage.saveStrokes(objectsRef.current)
+    drawObject(ctxRef.current, obj)
+  }
+
   const handleMouseDown = (e) => {
-    if (!ctx) return
-    const { offsetX, offsetY } = e.nativeEvent
+    if (!ctx || isPlaying) return
+    const rect = canvasRef.current.getBoundingClientRect()
+    const offsetX = e.clientX - rect.left
+    const offsetY = e.clientY - rect.top
 
     if (tool === 'text') {
-        setTextInput({ x: offsetX, y: offsetY, value: '' })
+        if (!textInput) {
+            setTextInput({ x: offsetX, y: offsetY, value: '' })
+        }
         return
     }
 
@@ -144,11 +267,12 @@ export default function Canvas({ backgroundImage, theme = 'dark' }) {
   }
 
   const handleMouseMove = (e) => {
-    if (!isDrawing.current || !ctx) return
-    const { offsetX, offsetY } = e.nativeEvent
+    if (!isDrawing.current || !ctx || isPlaying) return
+    const rect = canvasRef.current.getBoundingClientRect()
+    const offsetX = e.clientX - rect.left
+    const offsetY = e.clientY - rect.top
 
     if (tool === 'pen') {
-        // Draw segment locally right now
         ctx.beginPath()
         ctx.strokeStyle = color
         ctx.lineWidth = width
@@ -156,18 +280,15 @@ export default function Canvas({ backgroundImage, theme = 'dark' }) {
         ctx.lineTo(offsetX, offsetY)
         ctx.stroke()
 
-        // Create remote segment immediately for streaming
-        const segObj = {
+        addObject({
            type: 'segment',
            startX: lastPos.current.x, startY: lastPos.current.y,
            endX: offsetX, endY: offsetY,
            color, width
-        }
-        push(ref(rtdb, `sessions/${ROOM_ID}/strokes`), segObj)
+        })
         
         lastPos.current = { x: offsetX, y: offsetY }
     } else {
-        // For line and rect, preview the shape locally by redrawing everything + preview
         redrawAll()
         ctx.beginPath()
         ctx.strokeStyle = color
@@ -199,71 +320,41 @@ export default function Canvas({ backgroundImage, theme = 'dark' }) {
   }
 
   const handleMouseUp = (e) => {
-    if (!isDrawing.current || !ctx) return
+    if (!isDrawing.current || !ctx || isPlaying) return
     isDrawing.current = false
 
-    const { offsetX, offsetY } = e.nativeEvent
+    const rect = canvasRef.current.getBoundingClientRect()
+    const offsetX = e.clientX - rect.left
+    const offsetY = e.clientY - rect.top
 
     if (tool === 'line') {
-        const lineObj = {
-           type: 'line',
-           startX: startPos.current.x, startY: startPos.current.y,
-           endX: offsetX, endY: offsetY,
-           color, width
-        }
-        push(ref(rtdb, `sessions/${ROOM_ID}/strokes`), lineObj)
-        redrawAll()
+        addObject({ type: 'line', startX: startPos.current.x, startY: startPos.current.y, endX: offsetX, endY: offsetY, color, width })
     } else if (tool === 'rect') {
-        const rectObj = {
-           type: 'rect',
-           startX: startPos.current.x, startY: startPos.current.y,
-           w: offsetX - startPos.current.x, h: offsetY - startPos.current.y,
-           color, width
-        }
-        push(ref(rtdb, `sessions/${ROOM_ID}/strokes`), rectObj)
-        redrawAll()
+        addObject({ type: 'rect', startX: startPos.current.x, startY: startPos.current.y, w: offsetX - startPos.current.x, h: offsetY - startPos.current.y, color, width })
     } else if (tool === 'triangle') {
-        const triObj = {
-           type: 'triangle',
-           startX: startPos.current.x, startY: startPos.current.y,
-           endX: offsetX, endY: offsetY,
-           color, width
-        }
-        push(ref(rtdb, `sessions/${ROOM_ID}/strokes`), triObj)
-        redrawAll()
+        addObject({ type: 'triangle', startX: startPos.current.x, startY: startPos.current.y, endX: offsetX, endY: offsetY, color, width })
     } else if (tool === 'ruler') {
-        const rulerObj = {
-           type: 'ruler',
-           startX: startPos.current.x, startY: startPos.current.y,
-           endX: offsetX, endY: offsetY,
-           color, width
-        }
-        push(ref(rtdb, `sessions/${ROOM_ID}/strokes`), rulerObj)
-        redrawAll()
+        addObject({ type: 'ruler', startX: startPos.current.x, startY: startPos.current.y, endX: offsetX, endY: offsetY, color, width })
     }
+    redrawAll()
   }
 
-  const handleTextSubmit = (e) => {
-      e.preventDefault()
-      if (textInput?.value.trim()) {
-          const textObj = {
+  const handleTextSubmit = (val) => {
+      const text = val || textInput?.value
+      if (text?.trim()) {
+          addObject({
              type: 'text',
              x: textInput.x,
              y: textInput.y,
-             text: textInput.value,
+             text: text,
              color, width
-          }
-           push(ref(rtdb, `sessions/${ROOM_ID}/strokes`), textObj)
+          })
       }
       setTextInput(null)
   }
 
-  const clearCanvas = () => {
-     if (ctx && canvasRef.current) remove(ref(rtdb, `sessions/${ROOM_ID}/strokes`))
-  }
-
   return (
-    <div className={`relative w-full h-full overflow-hidden transition-colors duration-500 ${theme === 'dark' ? 'bg-gray-950' : 'bg-white'}`}>
+    <div ref={containerRef} className={`relative w-full h-full overflow-hidden transition-colors duration-500 ${theme === 'dark' ? 'bg-gray-950' : 'bg-white'}`}>
       
       {/* Grid Overlay */}
       <div 
@@ -276,14 +367,11 @@ export default function Canvas({ backgroundImage, theme = 'dark' }) {
         }} 
       />
 
-      {backgroundImage && (
-        <div 
-          className="absolute inset-0 bg-contain bg-center bg-no-repeat opacity-40 pointer-events-none transition-all duration-500"
-          style={{ backgroundImage: `url(${backgroundImage})` }}
-        />
-      )}
+      <canvas
+        ref={bgCanvasRef}
+        className="absolute inset-0 w-full h-full pointer-events-none opacity-60"
+      />
 
-      {/* Draggable Straightedge Ruler Guide */}
       <AnimatePresence>
         {showRulerGuide && (
           <motion.div
@@ -300,7 +388,7 @@ export default function Canvas({ backgroundImage, theme = 'dark' }) {
                    <div key={i} className={`h-2 w-px ${i % 5 === 0 ? 'h-4 bg-primary' : 'bg-gray-500'}`} />
                 ))}
              </div>
-             <div className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-bold tracking-widest pointer-events-none">STRAIGHTEDGE GUIDE</div>
+             <div className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-bold tracking-widest pointer-events-none">STRAIGHTEDGE</div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -311,8 +399,27 @@ export default function Canvas({ backgroundImage, theme = 'dark' }) {
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
-        className="w-full h-full cursor-crosshair relative z-10"
+        className={`w-full h-full cursor-crosshair relative z-10 ${isPlaying ? 'pointer-events-none' : ''}`}
       />
+
+      {textInput && (
+         <div 
+           className="absolute z-[200] shadow-2xl border-2 border-primary rounded-lg overflow-hidden flex flex-col" 
+           style={{ left: textInput.x, top: textInput.y - 40 }}
+          >
+            <input 
+               autoFocus
+               type="text" 
+               className={`px-3 py-2 outline-none min-w-[150px] ${theme === 'dark' ? 'bg-gray-900 text-white' : 'bg-white text-black'}`}
+               style={{ color, fontSize: `${width * 4 + 16}px` }}
+               value={textInput.value}
+               onChange={(e) => setTextInput({ ...textInput, value: e.target.value })}
+               onKeyDown={(e) => e.key === 'Enter' && handleTextSubmit()}
+               onBlur={() => handleTextSubmit()}
+            />
+            <div className="bg-primary text-[8px] text-white font-bold px-2 py-0.5 uppercase tracking-widest text-center">Press Enter to Add</div>
+         </div>
+      )}
 
       {/* Toolbar */}
       <div className={`absolute top-4 left-1/2 -translate-x-1/2 z-20 backdrop-blur-md px-6 py-3 rounded-full border shadow-2xl flex items-center gap-6 transition-all duration-300
@@ -329,7 +436,7 @@ export default function Canvas({ backgroundImage, theme = 'dark' }) {
             ].map(t => (
                 <button 
                   key={t.id}
-                  onClick={() => setTool(t.id)}
+                  onClick={() => { setTool(t.id); setTextInput(null) }}
                   className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all
                               ${tool === t.id ? 'bg-primary text-white shadow-lg shadow-primary/50' : 'hover:bg-primary/10'} 
                               ${theme === 'dark' && tool !== t.id ? 'text-gray-400' : 'text-gray-600'}`}
@@ -377,27 +484,15 @@ export default function Canvas({ backgroundImage, theme = 'dark' }) {
          <div className={`w-px h-6 mx-1 ${theme === 'dark' ? 'bg-white/20' : 'bg-gray-200'}`} />
 
          <button 
-           onClick={clearCanvas} 
+           onClick={() => { objectsRef.current = []; storage.clearStrokes(); redrawAll() }} 
            className="p-2 text-red-500 hover:bg-red-500 hover:text-white rounded-full transition-all group"
            title="Clear All"
           >
             <Trash2 size={20} className="group-hover:scale-110 transition-transform" />
          </button>
       </div>
-
-      {textInput && (
-         <form onSubmit={handleTextSubmit} className="absolute z-30" style={{ left: textInput.x, top: textInput.y - 12 }}>
-            <input 
-               autoFocus
-               type="text" 
-               className={`border border-primary px-2 py-1 outline-none shadow-xl rounded ${theme === 'dark' ? 'bg-gray-950/90 text-white' : 'bg-white/90 text-black'}`}
-               style={{ color: color, fontSize: `${width * 6 + 10}px` }}
-               value={textInput.value}
-               onChange={(e) => setTextInput({ ...textInput, value: e.target.value })}
-               onBlur={handleTextSubmit}
-            />
-         </form>
-      )}
     </div>
   )
-}
+})
+
+export default Canvas

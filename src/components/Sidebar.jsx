@@ -1,66 +1,50 @@
 import React, { useState, useEffect } from 'react'
-import { ref as rtdbRef, push, onValue } from 'firebase/database'
-import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage'
-import { rtdb, storage } from '../firebase/config'
-
-const ROOM_ID = 'test-session-123'
+import { storage } from '../utils/storage'
 
 export default function Sidebar({ onSetBackground, onSetSideBySide, theme = 'dark' }) {
   const [documents, setDocuments] = useState([])
   const [isUploading, setIsUploading] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState(0)
   const [openMenuId, setOpenMenuId] = useState(null)
 
   useEffect(() => {
-     const docsRef = rtdbRef(rtdb, `sessions/${ROOM_ID}/documents`)
-     const unsubscribe = onValue(docsRef, (snapshot) => {
-        const data = snapshot.val()
-        if (data) {
-           const docsArray = Object.entries(data).map(([id, val]) => ({ id, ...val }))
-           setDocuments(docsArray)
-        } else {
-           setDocuments([])
-        }
-     })
-     return () => unsubscribe()
+     loadDocuments()
   }, [])
+
+  const loadDocuments = async () => {
+    const docs = await storage.getDocuments()
+    setDocuments(docs)
+  }
 
   const handleFileUpload = async (e) => {
       const file = e.target.files?.[0]
       if (!file) return
 
       setIsUploading(true)
-      setUploadProgress(0)
 
       try {
-        const fileRef = storageRef(storage, `sessions/${ROOM_ID}/${Date.now()}_${file.name}`)
-        const uploadTask = uploadBytesResumable(fileRef, file)
-
-        uploadTask.on('state_changed', 
-          (snapshot) => {
-              const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100
-              setUploadProgress(Math.round(progress))
-          },
-          (error) => {
-              console.error("Upload failed", error)
-              window.alert(`Upload failed: ${error.message}. Please ensure Firebase Storage is enabled and rules allow uploads.`)
-              setIsUploading(false)
-              setUploadProgress(0)
-          },
-          async () => {
-              const downloadURL = await getDownloadURL(uploadTask.snapshot.ref)
-              await push(rtdbRef(rtdb, `sessions/${ROOM_ID}/documents`), {
-                  title: file.name,
-                  url: downloadURL
-              })
-              setIsUploading(false)
-              setUploadProgress(0)
-          }
-        )
+        const reader = new FileReader()
+        reader.onload = async (event) => {
+            const dataUrl = event.target.result
+            await storage.saveDocument({
+                title: file.name,
+                url: dataUrl
+            })
+            await loadDocuments()
+            setIsUploading(false)
+        }
+        reader.readAsDataURL(file)
       } catch (err) {
         console.error("Setup failed", err)
-        window.alert(`Could not start upload: ${err.message}`)
+        window.alert(`Could not save document: ${err.message}`)
         setIsUploading(false)
+      }
+  }
+
+  const handleDelete = async (id) => {
+      if (window.confirm("Delete this document?")) {
+          await storage.deleteDocument(id)
+          await loadDocuments()
+          setOpenMenuId(null)
       }
   }
 
@@ -78,7 +62,7 @@ export default function Sidebar({ onSetBackground, onSetSideBySide, theme = 'dar
       <div className="mb-4">
          <label className={`block w-full text-center py-2 px-4 rounded border text-sm font-semibold transition-all cursor-pointer 
                           ${isUploading ? 'bg-gray-800 border-gray-700 text-gray-400' : 'bg-primary/10 border-primary text-primary hover:bg-primary/20'}`}>
-            {isUploading ? `Uploading... ${uploadProgress}%` : 'Upload Document'}
+            {isUploading ? `Saving...` : 'Upload Document'}
             <input 
                type="file" 
                accept="image/*,application/pdf" 
@@ -90,7 +74,9 @@ export default function Sidebar({ onSetBackground, onSetSideBySide, theme = 'dar
       </div>
 
       <div className="flex-1 overflow-y-auto space-y-3 pb-20 cursor-default">
-        <h3 className={`text-xs font-semibold uppercase tracking-wider mb-3 ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>Documents</h3>
+        <div className="flex justify-between items-center mb-3">
+          <h3 className={`text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>Documents</h3>
+        </div>
         {documents.map(doc => (
           <div
             key={doc.id}
@@ -110,8 +96,11 @@ export default function Sidebar({ onSetBackground, onSetSideBySide, theme = 'dar
 
             {/* Document Preview Thumbnail */}
             <div className={`w-full h-24 rounded-md overflow-hidden opacity-80 flex items-center justify-center ${theme === 'dark' ? 'bg-gray-950' : 'bg-gray-200'}`}>
-               {doc.url.toLowerCase().includes('.pdf') ? (
-                  <span className="text-[10px] text-red-500 font-bold tracking-tighter">PDF DOCUMENT</span>
+               {doc.url.startsWith('data:application/pdf') || doc.title.toLowerCase().endsWith('.pdf') ? (
+                  <div className="flex flex-col items-center gap-1">
+                     <span className="text-[10px] text-red-500 font-bold tracking-tighter">PDF DOCUMENT</span>
+                     <span className="text-[8px] text-gray-500 truncate max-w-[80px]">{doc.title}</span>
+                  </div>
                ) : (
                   <img src={doc.url} alt={doc.title} className="w-full h-full object-cover" />
                )}
@@ -131,16 +120,22 @@ export default function Sidebar({ onSetBackground, onSetSideBySide, theme = 'dar
                      className={`px-3 py-2 text-xs text-left transition ${theme === 'dark' ? 'hover:bg-gray-700 text-gray-200' : 'hover:bg-gray-100 text-gray-700'}`}>
                      View Side-by-Side
                   </button>
+                  <div className={`h-px w-full ${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-200'}`} />
+                  <button 
+                     onClick={() => handleDelete(doc.id)} 
+                     className="px-3 py-2 text-xs text-left transition text-red-500 hover:bg-red-500/10">
+                     Delete Document
+                  </button>
                </div>
             )}
           </div>
         ))}
         {documents.length === 0 && (
-           <p className="text-xs text-gray-500 italic text-center py-4">No documents uploaded.</p>
+           <p className="text-xs text-gray-500 italic text-center py-4">No documents saved.</p>
         )}
       </div>
       <div className={`mt-4 pt-4 border-t pb-2 ${borderColor}`}>
-        <div className="text-[10px] text-gray-500 text-center uppercase tracking-widest">Room ID: <span className="font-mono text-primary font-bold">{ROOM_ID}</span></div>
+        <div className="text-[10px] text-gray-500 text-center uppercase tracking-widest">Public Web Mode (Local Storage Only)</div>
       </div>
     </div>
   )

@@ -1,13 +1,16 @@
-import React, { useState } from 'react'
+import React, { useState, useRef } from 'react'
 import Sidebar from './components/Sidebar'
 import Canvas from './components/Canvas'
-import { Sun, Moon, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Sun, Moon, ChevronLeft, ChevronRight, Circle, Square, Play, Pause, Trash2 } from 'lucide-react'
 
 function App() {
   const [activeBackground, setActiveBackground] = useState(null)
   const [activeSideBySide, setActiveSideBySide] = useState(null)
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
-  const [theme, setTheme] = useState('dark') // 'dark' | 'light'
+  const [theme, setTheme] = useState('dark') 
+  const [recordingStatus, setRecordingStatus] = useState('idle') // idle, recording, playing, paused
+
+  const canvasRef = useRef(null)
 
   const toggleTheme = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark')
 
@@ -38,7 +41,76 @@ function App() {
 
         {/* The Whiteboard Canvas Container */}
         <section className={`relative transition-all duration-500 ${activeSideBySide ? 'w-1/2 border-r border-gray-800' : 'w-full'} h-full`}>
-           <Canvas backgroundImage={activeBackground} theme={theme} />
+           <Canvas 
+              ref={canvasRef}
+              backgroundImage={activeBackground} 
+              theme={theme} 
+              onRecordingStatusChange={setRecordingStatus}
+           />
+
+           {/* Recording Controls (Floating at Bottom) */}
+           <div className={`absolute bottom-6 left-1/2 -translate-x-1/2 z-50 backdrop-blur-xl px-6 py-3 rounded-2xl border shadow-2xl flex items-center gap-6 transition-all duration-300
+                          ${theme === 'dark' ? 'bg-gray-900/80 border-white/10' : 'bg-white/80 border-gray-200'}`}>
+              
+              {recordingStatus === 'idle' && (
+                <button 
+                  onClick={() => canvasRef.current?.startRecording()}
+                  className="flex items-center gap-2 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-xl font-bold transition-all hover:scale-105 shadow-lg shadow-red-500/20"
+                >
+                  <Circle size={18} fill="currentColor" />
+                  <span>Record</span>
+                </button>
+              )}
+
+              {recordingStatus === 'recording' && (
+                <button 
+                  onClick={() => canvasRef.current?.stopRecording()}
+                  className="flex items-center gap-2 px-4 py-2 bg-gray-700 hover:bg-gray-800 text-white rounded-xl font-bold transition-all hover:scale-105"
+                >
+                  <Square size={18} fill="currentColor" />
+                  <span>Stop Recording</span>
+                </button>
+              )}
+
+              {recordingStatus === 'idle' && (
+                <button 
+                  onClick={() => canvasRef.current?.playLastRecording()}
+                  className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/80 text-white rounded-xl font-bold transition-all hover:scale-105 shadow-lg shadow-primary/20"
+                >
+                  <Play size={18} fill="currentColor" />
+                  <span>Play Back</span>
+                </button>
+              )}
+
+              {recordingStatus === 'playing' && (
+                <button 
+                  onClick={() => canvasRef.current?.pausePlayback()}
+                  className="flex items-center gap-2 px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded-xl font-bold transition-all hover:scale-105"
+                >
+                  <Pause size={18} fill="currentColor" />
+                  <span>Pause</span>
+                </button>
+              )}
+
+              <div className={`w-px h-6 ${theme === 'dark' ? 'bg-white/10' : 'bg-gray-200'}`} />
+
+              <button 
+                onClick={() => canvasRef.current?.clearCanvas()}
+                className={`p-2 rounded-xl transition-all ${theme === 'dark' ? 'text-gray-400 hover:text-red-400 hover:bg-red-400/10' : 'text-gray-500 hover:text-red-500 hover:bg-red-500/10'}`}
+                title="Clear All"
+              >
+                <Trash2 size={20} />
+              </button>
+
+              {/* Status Indicator */}
+              <div className="flex items-center gap-2 min-w-[80px]">
+                {recordingStatus === 'recording' && <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />}
+                {recordingStatus === 'playing' && <div className="w-2 h-2 bg-primary rounded-full animate-pulse" />}
+                <span className={`text-[10px] font-bold uppercase tracking-widest ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>
+                  {recordingStatus}
+                </span>
+              </div>
+           </div>
 
            {/* Theme Toggle Button */}
            <button 
@@ -61,7 +133,7 @@ function App() {
                   Close Split View
               </button>
 
-              {activeSideBySide.toLowerCase().includes('.pdf') ? (
+              {activeSideBySide.startsWith('data:application/pdf') || activeSideBySide.toLowerCase().includes('.pdf') ? (
                   <iframe 
                      src={activeSideBySide} 
                      className="w-full h-full border-0 rounded-lg shadow-inner"
