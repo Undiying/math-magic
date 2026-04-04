@@ -45,5 +45,10 @@ export const storage = {
   },
   async getRecordings() {
     return (await localforage.getItem(RECORDINGS_KEY)) || []
+  },
+  async deleteRecording(id) {
+    const recordings = (await localforage.getItem(RECORDINGS_KEY)) || []
+    const newRecs = recordings.filter(r => r.id !== id)
+    return await localforage.setItem(RECORDINGS_KEY, newRecs)
   }
 }
