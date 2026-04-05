@@ -3,6 +3,7 @@ import Sidebar from './components/Sidebar'
 import Canvas from './components/Canvas'
 import CalculatorComponent from './components/Calculator'
 import StraightEdge from './components/StraightEdge'
+import { motion, AnimatePresence } from 'framer-motion'
 import { Sun, Moon, ChevronLeft, ChevronRight, Circle, Square, Play, Pause, Trash2, Download, FileText, Calculator, Ruler } from 'lucide-react'
 import { jsPDF } from 'jspdf'
 
