@@ -1,7 +1,9 @@
 import React, { useState, useRef } from 'react'
 import Sidebar from './components/Sidebar'
 import Canvas from './components/Canvas'
-import { Sun, Moon, ChevronLeft, ChevronRight, Circle, Square, Play, Pause, Trash2, Download, FileText } from 'lucide-react'
+import CalculatorComponent from './components/Calculator'
+import StraightEdge from './components/StraightEdge'
+import { Sun, Moon, ChevronLeft, ChevronRight, Circle, Square, Play, Pause, Trash2, Download, FileText, Calculator, Ruler } from 'lucide-react'
 import { jsPDF } from 'jspdf'
 
 function App() {
@@ -11,6 +13,8 @@ function App() {
   const [theme, setTheme] = useState('dark') 
   const [recordingStatus, setRecordingStatus] = useState('idle') // idle, recording, playing, paused
   const [selectedStrokes, setSelectedStrokes] = useState(null)
+  const [showCalculator, setShowCalculator] = useState(false)
+  const [showStraightEdge, setShowStraightEdge] = useState(false)
 
   const canvasRef = useRef(null)
 
@@ -59,6 +63,7 @@ function App() {
           {isSidebarOpen ? <ChevronLeft size={20} /> : <ChevronRight size={20} />}
         </button>
 
+        {/* Main Canvas Area */}
         <section className={`relative transition-all duration-500 ${activeSideBySide ? 'w-1/2 border-r border-gray-800' : 'w-full'} h-full`}>
            <Canvas 
               ref={canvasRef}
@@ -66,6 +71,31 @@ function App() {
               theme={theme} 
               onRecordingStatusChange={setRecordingStatus}
            />
+
+           {/* Utility Tools */}
+           <div className="absolute top-6 right-6 z-50 flex items-center gap-2">
+               <button 
+                 onClick={() => setShowStraightEdge(p => !p)}
+                 className={`p-3 rounded-full border shadow-xl transition-all duration-300 hover:scale-110 
+                             ${showStraightEdge ? 'bg-primary text-white border-primary shadow-primary/30' : theme === 'dark' ? 'bg-surface border-gray-700 text-gray-400 hover:text-white' : 'bg-white border-gray-200 text-gray-500 hover:text-primary'}`}
+                 title="Toggle Straight-edge Ruler"
+               >
+                 <Ruler size={20} />
+               </button>
+               <button 
+                 onClick={() => setShowCalculator(p => !p)}
+                 className={`p-3 rounded-full border shadow-xl transition-all duration-300 hover:scale-110 
+                             ${showCalculator ? 'bg-primary text-white border-primary shadow-primary/30' : theme === 'dark' ? 'bg-surface border-gray-700 text-gray-400 hover:text-white' : 'bg-white border-gray-200 text-gray-500 hover:text-primary'}`}
+                 title="Toggle Calculator"
+               >
+                 <Calculator size={20} />
+               </button>
+           </div>
+
+           <AnimatePresence>
+               {showCalculator && <CalculatorComponent theme={theme} onClose={() => setShowCalculator(false)} />}
+               {showStraightEdge && <StraightEdge theme={theme} onClose={() => setShowStraightEdge(false)} />}
+           </AnimatePresence>
 
            {/* Recording Controls (Floating at Bottom) */}
            <div className={`absolute bottom-6 left-1/2 -translate-x-1/2 z-50 backdrop-blur-xl px-6 py-3 rounded-2xl border shadow-2xl flex items-center gap-6 transition-all duration-300

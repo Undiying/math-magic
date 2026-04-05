@@ -26,6 +26,7 @@ const Canvas = forwardRef(({ backgroundImage, theme = 'dark', onRecordingStatusC
   const [textInput, setTextInput] = useState(null)
   const [showGrid, setShowGrid] = useState(true)
   const [triangleType, setTriangleType] = useState('right') // 'right' or 'normal'
+  const [rulerUnit, setRulerUnit] = useState('px')
 
   // Infinite Canvas State
   const [offset, setOffset] = useState({ x: 0, y: 0 })
@@ -323,10 +324,21 @@ const Canvas = forwardRef(({ backgroundImage, theme = 'dark', onRecordingStatusC
          context.stroke()
          const midX = (obj.startX + obj.endX) / 2
          const midY = (obj.startY + obj.endY) / 2
-         const dist = Math.round(Math.sqrt(Math.pow(obj.endX - obj.startX, 2) + Math.pow(obj.endY - obj.startY, 2)))
+         const dist = Math.sqrt(Math.pow(obj.endX - obj.startX, 2) + Math.pow(obj.endY - obj.startY, 2))
+         
+         const unit = obj.unit || 'px'
+         let displayValue = ''
+         if (unit === 'cm') {
+            displayValue = `${(dist / 37.795).toFixed(1)}cm`
+         } else if (unit === 'in') {
+            displayValue = `${(dist / 96).toFixed(1)}in`
+         } else {
+            displayValue = `${Math.round(dist)}px`
+         }
+
          context.font = `${12 / scale}px sans-serif`
          context.fillStyle = theme === 'dark' ? '#ffffff' : '#000000'
-         context.fillText(`${dist}px`, midX + 10 / scale, midY)
+         context.fillText(displayValue, midX + 10 / scale, midY)
       } else if (obj.type === 'text') {
          const fontSize = obj.width * 4 + 16
          context.font = `${fontSize}px sans-serif`
@@ -358,11 +370,11 @@ const Canvas = forwardRef(({ backgroundImage, theme = 'dark', onRecordingStatusC
     const mouse = toWorld(clientX - rect.left, clientY - rect.top)
 
     if (tool === 'text') {
+        e.preventDefault() // prevent browser from stealing focus back from the input!
         if (textInput) {
-            handleTextSubmit()
-        } else {
-            setTextInput({ x: mouse.x, y: mouse.y, value: '' })
+            handleTextSubmit() // Will submit old text first
         }
+        setTextInput({ x: mouse.x, y: mouse.y, value: '' })
         return
     }
 
@@ -427,10 +439,15 @@ const Canvas = forwardRef(({ backgroundImage, theme = 'dark', onRecordingStatusC
             ctx.moveTo(startPos.current.x, startPos.current.y)
             ctx.lineTo(mouse.x, mouse.y)
             ctx.stroke()
-            const dist = Math.round(Math.sqrt(Math.pow(mouse.x - startPos.current.x, 2) + Math.pow(mouse.y - startPos.current.y, 2)))
+            const dist = Math.sqrt(Math.pow(mouse.x - startPos.current.x, 2) + Math.pow(mouse.y - startPos.current.y, 2))
+            let displayValue = ''
+            if (rulerUnit === 'cm') displayValue = `${(dist / 37.795).toFixed(1)}cm`
+            else if (rulerUnit === 'in') displayValue = `${(dist / 96).toFixed(1)}in`
+            else displayValue = `${Math.round(dist)}px`
+
             ctx.font = `${12 / scale}px sans-serif`
             ctx.fillStyle = theme === 'dark' ? '#ffffff' : '#000000'
-            ctx.fillText(`${dist}px`, (startPos.current.x + mouse.x) / 2 + 10 / scale, (startPos.current.y + mouse.y) / 2)
+            ctx.fillText(displayValue, (startPos.current.x + mouse.x) / 2 + 10 / scale, (startPos.current.y + mouse.y) / 2)
         }
         ctx.restore()
     }
@@ -452,7 +469,7 @@ const Canvas = forwardRef(({ backgroundImage, theme = 'dark', onRecordingStatusC
     } else if (tool === 'triangle') {
         addObject({ type: 'triangle', startX: startPos.current.x, startY: startPos.current.y, endX: mouse.x, endY: mouse.y, w: mouse.x - startPos.current.x, h: mouse.y - startPos.current.y, triangleType, ...common })
     } else if (tool === 'ruler') {
-        addObject({ type: 'ruler', startX: startPos.current.x, startY: startPos.current.y, endX: mouse.x, endY: mouse.y, ...common })
+        addObject({ type: 'ruler', startX: startPos.current.x, startY: startPos.current.y, endX: mouse.x, endY: mouse.y, unit: rulerUnit, ...common })
     }
     redrawAll()
   }
@@ -520,6 +537,28 @@ const Canvas = forwardRef(({ backgroundImage, theme = 'dark', onRecordingStatusC
               </button>
            </motion.div>
         )}
+
+        {tool === 'ruler' && (
+            <motion.div 
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className={`absolute top-24 left-6 z-50 p-1 rounded-xl border flex flex-col gap-1 shadow-2xl duration-300
+                               ${theme === 'dark' ? 'bg-surface border-gray-700' : 'bg-white border-gray-200'}`}
+            >
+               {['px', 'cm', 'in'].map(unit => (
+                   <button 
+                     key={unit}
+                     onClick={() => setRulerUnit(unit)} 
+                     className={`p-2 rounded-lg transition-all text-xs font-bold uppercase tracking-wider
+                                ${rulerUnit === unit ? 'bg-primary text-white shadow-lg shadow-primary/40' : 'text-gray-500 hover:bg-primary/10'}`}
+                     title={`Measure in ${unit}`}
+                   >
+                     {unit === 'px' ? 'PX' : unit === 'cm' ? 'CM' : 'IN'}
+                   </button>
+               ))}
+            </motion.div>
+         )}
       </AnimatePresence>
 
       {/* Grid Overlay */}
@@ -562,7 +601,8 @@ const Canvas = forwardRef(({ backgroundImage, theme = 'dark', onRecordingStatusC
                value={textInput.value}
                onChange={(e) => setTextInput({ ...textInput, value: e.target.value })}
                onKeyDown={(e) => e.key === 'Enter' && handleTextSubmit()}
-               onBlur={() => handleTextSubmit()}
+               // Remove onBlur, handle external clicks strictly on the canvas mousedown
+
             />
             <div className="bg-primary text-[8px] text-white font-bold px-2 py-0.5 uppercase tracking-widest text-center">Press Enter to Add</div>
          </div>
